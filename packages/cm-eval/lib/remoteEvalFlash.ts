@@ -10,8 +10,9 @@ export const remoteEvalFlash = (document: Document) =>
 
       constructor(view: EditorView) {
         this._handleEval = (msg: EvalMessage) => {
-          const { docId, from, to } = msg;
+          const { docId, from, to, user } = msg;
           if (docId !== document.id) return;
+          if (user === document.session.user) return;
           flash(view, from, to);
         };
 
