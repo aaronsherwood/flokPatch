@@ -18,7 +18,12 @@ import {
   keymap,
   lineNumbers as lineNumbersExtension,
 } from "@codemirror/view";
-import { evalKeymap, flashField, remoteEvalFlash } from "@flok-editor/cm-eval";
+import {
+  evalKeymap,
+  evaluateLine,
+  flashField,
+  remoteEvalFlash,
+} from "@flok-editor/cm-eval";
 import { punctual } from "@flok-editor/lang-punctual";
 import { tidal } from "@flok-editor/lang-tidal";
 import { zwirn } from "@flok-editor/lang-zwirn";
@@ -43,6 +48,8 @@ const langExtensionsByLanguage: { [lang: string]: any } = {
   punctual: punctual,
 };
 const panicCodes = panicCodesUntyped as { [target: string]: string };
+const lastTidalLineEvalByDoc = new Map<string, number>();
+const TIDAL_LINE_EVAL_DEDUP_MS = 400;
 
 const panicKeymap = (
   doc: Document,
@@ -201,6 +208,24 @@ const tidalMuteKeymap = (doc: Document) => {
   return keymap.of(keybinds);
 };
 
+const tidalLineEvalKeymap = (doc: Document, web: boolean) => {
+  if (doc.target !== "tidal") return [];
+
+  return keymap.of([
+    {
+      key: "Shift-Enter",
+      run(view) {
+        const now = Date.now();
+        const previous = lastTidalLineEvalByDoc.get(doc.id) || 0;
+        if (now - previous < TIDAL_LINE_EVAL_DEDUP_MS) return true;
+        lastTidalLineEvalByDoc.set(doc.id, now);
+        evaluateLine(view, doc, web);
+        return true;
+      },
+    },
+  ]);
+};
+
 // extra keymaps
 const extraKeymap = () => {
   return keymap.of([
@@ -244,9 +269,13 @@ const flokSetup = (
       evalKeymap(doc, {
         defaultMode,
         web,
-        lineEvalKeys: noLineEval.includes(doc.target) ? [] : ["Shift-Enter"],
+        lineEvalKeys:
+          noLineEval.includes(doc.target) || doc.target === "tidal"
+            ? []
+            : ["Shift-Enter"],
       }),
     ),
+    Prec.high(tidalLineEvalKeymap(doc, web)),
     Prec.high(tidalMuteKeymap(doc)),
     panicKeymap(doc),
     extraKeymap(),

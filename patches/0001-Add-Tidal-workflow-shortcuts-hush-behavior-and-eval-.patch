@@ -1,0 +1,365 @@
+From 03096da28da02822ef5f3d58980755531fcffc94 Mon Sep 17 00:00:00 2001
+From: aaronsherwood <info@aaron-sherwood.com>
+Date: Fri, 20 Feb 2026 12:17:29 +0400
+Subject: [PATCH] Add Tidal workflow shortcuts, hush behavior, and eval fixes
+
+---
+ packages/cm-eval/lib/eval.ts            |  33 +++++-
+ packages/web/index.html                 |  45 ++++++++
+ packages/web/src/components/editor.tsx  | 141 +++++++++++++++++++++++-
+ packages/web/src/hooks/use-shortcut.tsx |   2 +
+ packages/web/src/routes/session.tsx     |  38 ++++++-
+ 5 files changed, 255 insertions(+), 4 deletions(-)
+
+diff --git a/packages/cm-eval/lib/eval.ts b/packages/cm-eval/lib/eval.ts
+index 1922216..8c8d2d8 100644
+--- a/packages/cm-eval/lib/eval.ts
++++ b/packages/cm-eval/lib/eval.ts
+@@ -9,6 +9,34 @@ interface EvalBlock {
+   to: number | null;
+ }
+ 
++const lastLineEvalByView = new WeakMap<EditorView, {
++  text: string;
++  from: number;
++  to: number;
++  ts: number;
++}>();
++
++const LINE_EVAL_DEDUP_WINDOW_MS = 100;
++
++const isDuplicateLineEval = (view: EditorView, evalBlock: EvalBlock) => {
++  const { text, from, to } = evalBlock;
++  if (from === null || to === null) return false;
++
++  const now = Date.now();
++  const previous = lastLineEvalByView.get(view);
++
++  lastLineEvalByView.set(view, { text, from, to, ts: now });
++
++  if (!previous) return false;
++
++  return (
++    previous.text === text &&
++    previous.from === from &&
++    previous.to === to &&
++    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS
++  );
++};
++
+ export function getSelection(state: EditorState): EvalBlock {
+   if (state.selection.main.empty) return { text: "", from: null, to: null };
+ 
+@@ -74,7 +102,10 @@ export const evaluateLine = (
+   web: boolean = false,
+ ) => {
+   const { state } = view;
+-  const { text, from, to } = getLine(state);
++  const evalBlock = getLine(state);
++  if (isDuplicateLineEval(view, evalBlock)) return;
++
++  const { text, from, to } = evalBlock;
+   flash(view, from, to);
+   doc.evaluate(text, { from, to }, web ? "web" : "default");
+ };
+diff --git a/packages/web/index.html b/packages/web/index.html
+index f25d7fe..95ed611 100644
+--- a/packages/web/index.html
++++ b/packages/web/index.html
+@@ -15,6 +15,51 @@
+     class="min-h-screen font-sans antialiased overscroll-none overflow-hidden text-slate-50"
+   >
+     <div id="root"></div>
++    <script>
++      navigator.requestMIDIAccess().then(onMIDISuccess, onMIDIFailure);
++
++      function onMIDISuccess(midiAccess) {
++        console.log(midiAccess);
++        for (const input of midiAccess.inputs.values()) {
++          input.onmidimessage = getMIDIMessage;
++        }
++      }
++
++      function onMIDIFailure() {
++        console.log("Could not access your MIDI devices.");
++      }
++
++      var cc = Array(128).fill(0.5);
++      var ccActual = Array(128).fill(0);
++
++      function getMIDIMessage(midiMessage) {
++        var arr = midiMessage.data;
++        var index = arr[1];
++        var val = arr[2] / 127.0;
++        cc[index] = val;
++        ccActual[index] = arr[2];
++      }
++
++      window.cc = cc;
++      window.ccActual = ccActual;
++
++      window.loadScript = (url = "") => {
++        const p = new Promise((res) => {
++          var script = document.createElement("script");
++          script.onload = function () {
++            console.log(`loaded script ${url}`);
++            res();
++          };
++          script.onerror = () => {
++            console.log(`error loading script ${url}`, "log-error");
++            res();
++          };
++          script.src = url;
++          document.head.appendChild(script);
++        });
++        return p;
++      };
++    </script>
+     <script type="module" src="/src/main.tsx"></script>
+   </body>
+ </html>
+diff --git a/packages/web/src/components/editor.tsx b/packages/web/src/components/editor.tsx
+index 2f471c2..018fe73 100644
+--- a/packages/web/src/components/editor.tsx
++++ b/packages/web/src/components/editor.tsx
+@@ -63,6 +63,144 @@ const panicKeymap = (
+     : [];
+ };
+ 
++const tidalMuteKeymap = (doc: Document) => {
++  if (doc.target !== "tidal") return [];
++
++  const mutedOutputs = new Set<number>();
++  const soloedOutputs = new Set<number>();
++  const resetOutputs = Array.from({ length: 20 }, (_, i) => i + 1);
++
++  const toggleMute = (output: number) => {
++    if (mutedOutputs.has(output)) {
++      mutedOutputs.delete(output);
++      doc.evaluate(`unmute ${output}`, { from: null, to: null });
++      return;
++    }
++
++    mutedOutputs.add(output);
++    doc.evaluate(`mute ${output}`, { from: null, to: null });
++  };
++
++  const keybinds = [];
++
++  const toggleSolo = (output: number) => {
++    if (soloedOutputs.has(output)) {
++      soloedOutputs.delete(output);
++      doc.evaluate(`unsolo ${output}`, { from: null, to: null });
++      return;
++    }
++
++    soloedOutputs.add(output);
++    doc.evaluate(`solo ${output}`, { from: null, to: null });
++  };
++
++  for (let i = 1; i <= 9; i += 1) {
++    keybinds.push({
++      key: `Ctrl-${i}`,
++      run() {
++        toggleMute(i);
++        return true;
++      },
++    });
++    keybinds.push({
++      key: `Cmd-${i}`,
++      run() {
++        toggleMute(i);
++        return true;
++      },
++    });
++
++    const output = i + 10;
++    keybinds.push({
++      key: `Ctrl-Alt-${i}`,
++      run() {
++        toggleMute(output);
++        return true;
++      },
++    });
++    keybinds.push({
++      key: `Cmd-Alt-${i}`,
++      run() {
++        toggleMute(output);
++        return true;
++      },
++    });
++
++    keybinds.push({
++      key: `Ctrl-Shift-${i}`,
++      run() {
++        toggleSolo(i);
++        return true;
++      },
++    });
++    keybinds.push({
++      key: `Cmd-Shift-${i}`,
++      run() {
++        toggleSolo(i);
++        return true;
++      },
++    });
++
++    keybinds.push({
++      key: `Ctrl-Alt-Shift-${i}`,
++      run() {
++        toggleSolo(output);
++        return true;
++      },
++    });
++    keybinds.push({
++      key: `Cmd-Alt-Shift-${i}`,
++      run() {
++        toggleSolo(output);
++        return true;
++      },
++    });
++  }
++
++  keybinds.push({
++    key: "Ctrl-0",
++    run() {
++      mutedOutputs.clear();
++      resetOutputs.forEach((output) => {
++        doc.evaluate(`unmute ${output}`, { from: null, to: null });
++      });
++      return true;
++    },
++  });
++  keybinds.push({
++    key: "Cmd-0",
++    run() {
++      mutedOutputs.clear();
++      resetOutputs.forEach((output) => {
++        doc.evaluate(`unmute ${output}`, { from: null, to: null });
++      });
++      return true;
++    },
++  });
++  keybinds.push({
++    key: "Ctrl-Shift-0",
++    run() {
++      soloedOutputs.clear();
++      resetOutputs.forEach((output) => {
++        doc.evaluate(`unsolo ${output}`, { from: null, to: null });
++      });
++      return true;
++    },
++  });
++  keybinds.push({
++    key: "Cmd-Shift-0",
++    run() {
++      soloedOutputs.clear();
++      resetOutputs.forEach((output) => {
++        doc.evaluate(`unsolo ${output}`, { from: null, to: null });
++      });
++      return true;
++    },
++  });
++
++  return keymap.of(keybinds);
++};
++
+ // extra keymaps
+ const extraKeymap = () => {
+   return keymap.of([
+@@ -106,9 +244,10 @@ const flokSetup = (
+       evalKeymap(doc, {
+         defaultMode,
+         web,
+-        lineEvalKeys: noLineEval ? [] : ["Shift-Enter"],
++        lineEvalKeys: noLineEval.includes(doc.target) ? [] : ["Shift-Enter"],
+       }),
+     ),
++    Prec.high(tidalMuteKeymap(doc)),
+     panicKeymap(doc),
+     extraKeymap(),
+     autoIndentKeymap(doc),
+diff --git a/packages/web/src/hooks/use-shortcut.tsx b/packages/web/src/hooks/use-shortcut.tsx
+index d82506f..445a000 100644
+--- a/packages/web/src/hooks/use-shortcut.tsx
++++ b/packages/web/src/hooks/use-shortcut.tsx
+@@ -33,6 +33,8 @@ export function useShortcut(
+ 
+     useEffect(() => {
+       const down = (e: KeyboardEvent) => {
++        if (e.defaultPrevented) return;
++
+         const modifiersActive = allModifiers.every((m) => {
+           const prop = modifierMethods[m];
+           return modifiers.includes(m) ? e[prop] : !e[prop];
+diff --git a/packages/web/src/routes/session.tsx b/packages/web/src/routes/session.tsx
+index 6733151..7a7f562 100644
+--- a/packages/web/src/routes/session.tsx
++++ b/packages/web/src/routes/session.tsx
+@@ -441,6 +441,11 @@ export function Component() {
+     return i;
+   };
+ 
++  const resetTidalOutputs = useMemo(
++    () => Array.from({ length: 20 }, (_, i) => i + 1),
++    [],
++  );
++
+   // Global shortcuts
+   useShortcut(["Control-J", "Meta-J"], () =>
+     setCommandsDialogOpen((open) => !open),
+@@ -452,12 +457,41 @@ export function Component() {
+     ["Control-Shift-.", "Meta-Shift-."],
+     () => {
+       documents.forEach((doc) => {
++        if (doc.target === "tidal") {
++          resetTidalOutputs.forEach((output) => {
++            doc.evaluate(`unmute ${output}`, { from: null, to: null });
++          });
++          resetTidalOutputs.forEach((output) => {
++            doc.evaluate(`unsolo ${output}`, { from: null, to: null });
++          });
++        }
+         const panicCode = panicCodes[doc.target];
+         if (panicCode) doc.evaluate(panicCode, { from: null, to: null });
+       });
+       toast({ title: "Panic!", duration: 1000 });
+     },
+-    [documents],
++    [documents, resetTidalOutputs],
++  );
++  useShortcut(
++    ["Meta-Shift-H", "Control-Shift-H"],
++    () => {
++      documents.forEach((doc) => {
++        if (doc.target === "tidal") {
++          resetTidalOutputs.forEach((output) => {
++            doc.evaluate(`unmute ${output}`, { from: null, to: null });
++          });
++          resetTidalOutputs.forEach((output) => {
++            doc.evaluate(`unsolo ${output}`, { from: null, to: null });
++          });
++          doc.evaluate("hush", { from: null, to: null });
++        }
++        if (doc.target === "hydra") {
++          doc.evaluate("hush()", { from: null, to: null });
++        }
++      });
++      toast({ title: "Hush!", duration: 1000 });
++    },
++    [documents, resetTidalOutputs],
+   );
+   Array.from({ length: 8 }).map((_, i) => {
+     useShortcut([`Control-${i}`], () => focusEditor(i - 1), [...editorRefs]);
+@@ -483,7 +517,7 @@ export function Component() {
+     [documents, ...editorRefs],
+   );
+   useShortcut(
+-    ["Meta-Shift-H", "Control-Shift-H", "Meta-Alt-H", "Control-Alt-H"],
++    ["Meta-Alt-H", "Control-Alt-H"],
+     () => {
+       setHidden((p) => !p);
+     },
+-- 
+2.50.1 (Apple Git-155)
+

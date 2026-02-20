@@ -1,0 +1,16 @@
+diff --git a/packages/session/lib/session.ts b/packages/session/lib/session.ts
+index 446121d..84ff8a9 100644
+--- a/packages/session/lib/session.ts
++++ b/packages/session/lib/session.ts
+@@ -378,6 +378,11 @@ export class Session {
+         // If mode is web or webLocal, do not publish to :in topics (not a REPL target)
+         if (mode === "web" || mode === "webLocal") return;
+ 
++        // Only the originating client should relay :eval -> :in.
++        // Without this guard, every connected client forwards the same eval,
++        // which causes duplicate (or worse) REPL evaluations.
++        if (!fromMe) return;
++
+         // Notify to flok-repls
+         this._pubSubClient.publish(
+           `session:${this.name}:target:${target}:in`,

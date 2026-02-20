@@ -378,6 +378,11 @@ export class Session {
         // If mode is web or webLocal, do not publish to :in topics (not a REPL target)
         if (mode === "web" || mode === "webLocal") return;
 
+        // Only the originating client should relay :eval -> :in.
+        // Without this guard, every connected client forwards the same eval,
+        // which causes duplicate (or worse) REPL evaluations.
+        if (!fromMe) return;
+
         // Notify to flok-repls
         this._pubSubClient.publish(
           `session:${this.name}:target:${target}:in`,

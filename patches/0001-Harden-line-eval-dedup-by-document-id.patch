@@ -1,0 +1,71 @@
+From 23a21ba7493597e16610740620486d3b5e08f5a8 Mon Sep 17 00:00:00 2001
+From: aaronsherwood <info@aaron-sherwood.com>
+Date: Fri, 20 Feb 2026 16:47:46 +0400
+Subject: [PATCH] Harden line eval dedup by document id
+
+---
+ packages/cm-eval/lib/eval.ts | 28 ++++++++++++++++++++--------
+ 1 file changed, 20 insertions(+), 8 deletions(-)
+
+diff --git a/packages/cm-eval/lib/eval.ts b/packages/cm-eval/lib/eval.ts
+index 8c8d2d8..a9ab7f5 100644
+--- a/packages/cm-eval/lib/eval.ts
++++ b/packages/cm-eval/lib/eval.ts
+@@ -15,26 +15,38 @@ const lastLineEvalByView = new WeakMap<EditorView, {
+   to: number;
+   ts: number;
+ }>();
++const lastLineEvalByDoc = new Map<string, {
++  text: string;
++  from: number;
++  to: number;
++  ts: number;
++}>();
+ 
+ const LINE_EVAL_DEDUP_WINDOW_MS = 100;
+ 
+-const isDuplicateLineEval = (view: EditorView, evalBlock: EvalBlock) => {
++const isDuplicateLineEval = (
++  view: EditorView,
++  doc: Document,
++  evalBlock: EvalBlock,
++) => {
+   const { text, from, to } = evalBlock;
+   if (from === null || to === null) return false;
+ 
+   const now = Date.now();
+-  const previous = lastLineEvalByView.get(view);
++  const previousByView = lastLineEvalByView.get(view);
++  const previousByDoc = lastLineEvalByDoc.get(doc.id);
+ 
+   lastLineEvalByView.set(view, { text, from, to, ts: now });
++  lastLineEvalByDoc.set(doc.id, { text, from, to, ts: now });
+ 
+-  if (!previous) return false;
+-
+-  return (
++  const isDuplicate = (previous?: { text: string; from: number; to: number; ts: number }) =>
++    !!previous &&
+     previous.text === text &&
+     previous.from === from &&
+     previous.to === to &&
+-    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS
+-  );
++    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS;
++
++  return isDuplicate(previousByView) || isDuplicate(previousByDoc);
+ };
+ 
+ export function getSelection(state: EditorState): EvalBlock {
+@@ -103,7 +115,7 @@ export const evaluateLine = (
+ ) => {
+   const { state } = view;
+   const evalBlock = getLine(state);
+-  if (isDuplicateLineEval(view, evalBlock)) return;
++  if (isDuplicateLineEval(view, doc, evalBlock)) return;
+ 
+   const { text, from, to } = evalBlock;
+   flash(view, from, to);
+-- 
+2.50.1 (Apple Git-155)
+

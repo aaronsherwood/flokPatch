@@ -89,6 +89,8 @@ class CommandREPL extends BaseREPL {
   command: string;
   args: string[];
   repl: ChildProcess;
+  _lastBody: string = "";
+  _lastBodyTs: number = 0;
 
   constructor(ctx: CommandREPLContext) {
     const { target, session, tags, hub, pubSubPath, extraOptions } = ctx;
@@ -131,6 +133,14 @@ class CommandREPL extends BaseREPL {
   }
 
   write(body: string) {
+    const now = Date.now();
+    if (body === this._lastBody && now - this._lastBodyTs < 400) {
+      debug("drop duplicated eval body");
+      return;
+    }
+    this._lastBody = body;
+    this._lastBodyTs = now;
+
     const newBody = this.prepare(body);
     this.repl.stdin.write(`${newBody}\n\n`);
 
