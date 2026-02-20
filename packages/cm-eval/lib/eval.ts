@@ -15,26 +15,38 @@ const lastLineEvalByView = new WeakMap<EditorView, {
   to: number;
   ts: number;
 }>();
+const lastLineEvalByDoc = new Map<string, {
+  text: string;
+  from: number;
+  to: number;
+  ts: number;
+}>();
 
 const LINE_EVAL_DEDUP_WINDOW_MS = 100;
 
-const isDuplicateLineEval = (view: EditorView, evalBlock: EvalBlock) => {
+const isDuplicateLineEval = (
+  view: EditorView,
+  doc: Document,
+  evalBlock: EvalBlock,
+) => {
   const { text, from, to } = evalBlock;
   if (from === null || to === null) return false;
 
   const now = Date.now();
-  const previous = lastLineEvalByView.get(view);
+  const previousByView = lastLineEvalByView.get(view);
+  const previousByDoc = lastLineEvalByDoc.get(doc.id);
 
   lastLineEvalByView.set(view, { text, from, to, ts: now });
+  lastLineEvalByDoc.set(doc.id, { text, from, to, ts: now });
 
-  if (!previous) return false;
-
-  return (
+  const isDuplicate = (previous?: { text: string; from: number; to: number; ts: number }) =>
+    !!previous &&
     previous.text === text &&
     previous.from === from &&
     previous.to === to &&
-    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS
-  );
+    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS;
+
+  return isDuplicate(previousByView) || isDuplicate(previousByDoc);
 };
 
 export function getSelection(state: EditorState): EvalBlock {
@@ -103,7 +115,7 @@ export const evaluateLine = (
 ) => {
   const { state } = view;
   const evalBlock = getLine(state);
-  if (isDuplicateLineEval(view, evalBlock)) return;
+  if (isDuplicateLineEval(view, doc, evalBlock)) return;
 
   const { text, from, to } = evalBlock;
   flash(view, from, to);
