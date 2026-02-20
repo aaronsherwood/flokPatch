@@ -133,12 +133,16 @@ class CommandREPL extends BaseREPL {
   }
 
   write(body: string) {
+    const normalizedBody = body.replace(/\s+/g, " ").trim();
     const now = Date.now();
-    if (body === this._lastBody && now - this._lastBodyTs < 400) {
+    if (
+      normalizedBody === this._lastBody &&
+      now - this._lastBodyTs < 1500
+    ) {
       debug("drop duplicated eval body");
       return;
     }
-    this._lastBody = body;
+    this._lastBody = normalizedBody;
     this._lastBodyTs = now;
 
     const newBody = this.prepare(body);
