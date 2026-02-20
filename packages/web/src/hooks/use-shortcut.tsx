@@ -33,6 +33,8 @@ export function useShortcut(
 
     useEffect(() => {
       const down = (e: KeyboardEvent) => {
+        if (e.defaultPrevented) return;
+
         const modifiersActive = allModifiers.every((m) => {
           const prop = modifierMethods[m];
           return modifiers.includes(m) ? e[prop] : !e[prop];

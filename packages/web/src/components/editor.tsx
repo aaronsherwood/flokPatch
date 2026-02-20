@@ -63,6 +63,144 @@ const panicKeymap = (
     : [];
 };
 
+const tidalMuteKeymap = (doc: Document) => {
+  if (doc.target !== "tidal") return [];
+
+  const mutedOutputs = new Set<number>();
+  const soloedOutputs = new Set<number>();
+  const resetOutputs = Array.from({ length: 20 }, (_, i) => i + 1);
+
+  const toggleMute = (output: number) => {
+    if (mutedOutputs.has(output)) {
+      mutedOutputs.delete(output);
+      doc.evaluate(`unmute ${output}`, { from: null, to: null });
+      return;
+    }
+
+    mutedOutputs.add(output);
+    doc.evaluate(`mute ${output}`, { from: null, to: null });
+  };
+
+  const keybinds = [];
+
+  const toggleSolo = (output: number) => {
+    if (soloedOutputs.has(output)) {
+      soloedOutputs.delete(output);
+      doc.evaluate(`unsolo ${output}`, { from: null, to: null });
+      return;
+    }
+
+    soloedOutputs.add(output);
+    doc.evaluate(`solo ${output}`, { from: null, to: null });
+  };
+
+  for (let i = 1; i <= 9; i += 1) {
+    keybinds.push({
+      key: `Ctrl-${i}`,
+      run() {
+        toggleMute(i);
+        return true;
+      },
+    });
+    keybinds.push({
+      key: `Cmd-${i}`,
+      run() {
+        toggleMute(i);
+        return true;
+      },
+    });
+
+    const output = i + 10;
+    keybinds.push({
+      key: `Ctrl-Alt-${i}`,
+      run() {
+        toggleMute(output);
+        return true;
+      },
+    });
+    keybinds.push({
+      key: `Cmd-Alt-${i}`,
+      run() {
+        toggleMute(output);
+        return true;
+      },
+    });
+
+    keybinds.push({
+      key: `Ctrl-Shift-${i}`,
+      run() {
+        toggleSolo(i);
+        return true;
+      },
+    });
+    keybinds.push({
+      key: `Cmd-Shift-${i}`,
+      run() {
+        toggleSolo(i);
+        return true;
+      },
+    });
+
+    keybinds.push({
+      key: `Ctrl-Alt-Shift-${i}`,
+      run() {
+        toggleSolo(output);
+        return true;
+      },
+    });
+    keybinds.push({
+      key: `Cmd-Alt-Shift-${i}`,
+      run() {
+        toggleSolo(output);
+        return true;
+      },
+    });
+  }
+
+  keybinds.push({
+    key: "Ctrl-0",
+    run() {
+      mutedOutputs.clear();
+      resetOutputs.forEach((output) => {
+        doc.evaluate(`unmute ${output}`, { from: null, to: null });
+      });
+      return true;
+    },
+  });
+  keybinds.push({
+    key: "Cmd-0",
+    run() {
+      mutedOutputs.clear();
+      resetOutputs.forEach((output) => {
+        doc.evaluate(`unmute ${output}`, { from: null, to: null });
+      });
+      return true;
+    },
+  });
+  keybinds.push({
+    key: "Ctrl-Shift-0",
+    run() {
+      soloedOutputs.clear();
+      resetOutputs.forEach((output) => {
+        doc.evaluate(`unsolo ${output}`, { from: null, to: null });
+      });
+      return true;
+    },
+  });
+  keybinds.push({
+    key: "Cmd-Shift-0",
+    run() {
+      soloedOutputs.clear();
+      resetOutputs.forEach((output) => {
+        doc.evaluate(`unsolo ${output}`, { from: null, to: null });
+      });
+      return true;
+    },
+  });
+
+  return keymap.of(keybinds);
+};
+
 // extra keymaps
 const extraKeymap = () => {
   return keymap.of([
@@ -106,9 +244,10 @@ const flokSetup = (
       evalKeymap(doc, {
         defaultMode,
         web,
-        lineEvalKeys: noLineEval ? [] : ["Shift-Enter"],
+        lineEvalKeys: noLineEval.includes(doc.target) ? [] : ["Shift-Enter"],
       }),
     ),
+    Prec.high(tidalMuteKeymap(doc)),
     panicKeymap(doc),
     extraKeymap(),
     autoIndentKeymap(doc),

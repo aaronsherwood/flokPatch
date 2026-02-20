@@ -15,6 +15,51 @@
     class="min-h-screen font-sans antialiased overscroll-none overflow-hidden text-slate-50"
   >
     <div id="root"></div>
+    <script>
+      navigator.requestMIDIAccess().then(onMIDISuccess, onMIDIFailure);
+
+      function onMIDISuccess(midiAccess) {
+        console.log(midiAccess);
+        for (const input of midiAccess.inputs.values()) {
+          input.onmidimessage = getMIDIMessage;
+        }
+      }
+
+      function onMIDIFailure() {
+        console.log("Could not access your MIDI devices.");
+      }
+
+      var cc = Array(128).fill(0.5);
+      var ccActual = Array(128).fill(0);
+
+      function getMIDIMessage(midiMessage) {
+        var arr = midiMessage.data;
+        var index = arr[1];
+        var val = arr[2] / 127.0;
+        cc[index] = val;
+        ccActual[index] = arr[2];
+      }
+
+      window.cc = cc;
+      window.ccActual = ccActual;
+
+      window.loadScript = (url = "") => {
+        const p = new Promise((res) => {
+          var script = document.createElement("script");
+          script.onload = function () {
+            console.log(`loaded script ${url}`);
+            res();
+          };
+          script.onerror = () => {
+            console.log(`error loading script ${url}`, "log-error");
+            res();
+          };
+          script.src = url;
+          document.head.appendChild(script);
+        });
+        return p;
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -9,6 +9,34 @@ interface EvalBlock {
   to: number | null;
 }
 
+const lastLineEvalByView = new WeakMap<EditorView, {
+  text: string;
+  from: number;
+  to: number;
+  ts: number;
+}>();
+
+const LINE_EVAL_DEDUP_WINDOW_MS = 100;
+
+const isDuplicateLineEval = (view: EditorView, evalBlock: EvalBlock) => {
+  const { text, from, to } = evalBlock;
+  if (from === null || to === null) return false;
+
+  const now = Date.now();
+  const previous = lastLineEvalByView.get(view);
+
+  lastLineEvalByView.set(view, { text, from, to, ts: now });
+
+  if (!previous) return false;
+
+  return (
+    previous.text === text &&
+    previous.from === from &&
+    previous.to === to &&
+    now - previous.ts <= LINE_EVAL_DEDUP_WINDOW_MS
+  );
+};
+
 export function getSelection(state: EditorState): EvalBlock {
   if (state.selection.main.empty) return { text: "", from: null, to: null };
 
@@ -74,7 +102,10 @@ export const evaluateLine = (
   web: boolean = false,
 ) => {
   const { state } = view;
-  const { text, from, to } = getLine(state);
+  const evalBlock = getLine(state);
+  if (isDuplicateLineEval(view, evalBlock)) return;
+
+  const { text, from, to } = evalBlock;
   flash(view, from, to);
   doc.evaluate(text, { from, to }, web ? "web" : "default");
 };

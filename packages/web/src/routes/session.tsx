@@ -441,6 +441,11 @@ export function Component() {
     return i;
   };
 
+  const resetTidalOutputs = useMemo(
+    () => Array.from({ length: 20 }, (_, i) => i + 1),
+    [],
+  );
+
   // Global shortcuts
   useShortcut(["Control-J", "Meta-J"], () =>
     setCommandsDialogOpen((open) => !open),
@@ -452,12 +457,41 @@ export function Component() {
     ["Control-Shift-.", "Meta-Shift-."],
     () => {
       documents.forEach((doc) => {
+        if (doc.target === "tidal") {
+          resetTidalOutputs.forEach((output) => {
+            doc.evaluate(`unmute ${output}`, { from: null, to: null });
+          });
+          resetTidalOutputs.forEach((output) => {
+            doc.evaluate(`unsolo ${output}`, { from: null, to: null });
+          });
+        }
         const panicCode = panicCodes[doc.target];
         if (panicCode) doc.evaluate(panicCode, { from: null, to: null });
       });
       toast({ title: "Panic!", duration: 1000 });
     },
-    [documents],
+    [documents, resetTidalOutputs],
+  );
+  useShortcut(
+    ["Meta-Shift-H", "Control-Shift-H"],
+    () => {
+      documents.forEach((doc) => {
+        if (doc.target === "tidal") {
+          resetTidalOutputs.forEach((output) => {
+            doc.evaluate(`unmute ${output}`, { from: null, to: null });
+          });
+          resetTidalOutputs.forEach((output) => {
+            doc.evaluate(`unsolo ${output}`, { from: null, to: null });
+          });
+          doc.evaluate("hush", { from: null, to: null });
+        }
+        if (doc.target === "hydra") {
+          doc.evaluate("hush()", { from: null, to: null });
+        }
+      });
+      toast({ title: "Hush!", duration: 1000 });
+    },
+    [documents, resetTidalOutputs],
   );
   Array.from({ length: 8 }).map((_, i) => {
     useShortcut([`Control-${i}`], () => focusEditor(i - 1), [...editorRefs]);
@@ -483,7 +517,7 @@ export function Component() {
     [documents, ...editorRefs],
   );
   useShortcut(
-    ["Meta-Shift-H", "Control-Shift-H", "Meta-Alt-H", "Control-Alt-H"],
+    ["Meta-Alt-H", "Control-Alt-H"],
     () => {
       setHidden((p) => !p);
     },
