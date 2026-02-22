@@ -50,6 +50,23 @@ const langExtensionsByLanguage: { [lang: string]: any } = {
 const panicCodes = panicCodesUntyped as { [target: string]: string };
 const lastTidalLineEvalByDoc = new Map<string, number>();
 const TIDAL_LINE_EVAL_DEDUP_MS = 400;
+type TidalOutputState = {
+  muted: Set<number>;
+  soloed: Set<number>;
+};
+const tidalOutputStateByDoc = new Map<string, TidalOutputState>();
+
+const getTidalOutputState = (docId: string): TidalOutputState => {
+  const existing = tidalOutputStateByDoc.get(docId);
+  if (existing) return existing;
+
+  const created = {
+    muted: new Set<number>(),
+    soloed: new Set<number>(),
+  };
+  tidalOutputStateByDoc.set(docId, created);
+  return created;
+};
 
 const panicKeymap = (
   doc: Document,
@@ -73,8 +90,9 @@ const panicKeymap = (
 const tidalMuteKeymap = (doc: Document) => {
   if (doc.target !== "tidal") return [];
 
-  const mutedOutputs = new Set<number>();
-  const soloedOutputs = new Set<number>();
+  const outputState = getTidalOutputState(doc.id);
+  const mutedOutputs = outputState.muted;
+  const soloedOutputs = outputState.soloed;
   const resetOutputs = Array.from({ length: 20 }, (_, i) => i + 1);
 
   const toggleMute = (output: number) => {

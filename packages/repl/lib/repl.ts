@@ -89,8 +89,6 @@ class CommandREPL extends BaseREPL {
   command: string;
   args: string[];
   repl: ChildProcess;
-  _lastBody: string = "";
-  _lastBodyTs: number = 0;
   _lastWriteTs: number = 0;
 
   constructor(ctx: CommandREPLContext) {
@@ -134,22 +132,12 @@ class CommandREPL extends BaseREPL {
   }
 
   write(body: string) {
-    const normalizedBody = body.replace(/\s+/g, " ").trim();
     const now = Date.now();
     if (now - this._lastWriteTs < 120) {
       debug("drop near-simultaneous duplicated eval");
       return;
     }
-    if (
-      normalizedBody === this._lastBody &&
-      now - this._lastBodyTs < 1500
-    ) {
-      debug("drop duplicated eval body");
-      return;
-    }
     this._lastWriteTs = now;
-    this._lastBody = normalizedBody;
-    this._lastBodyTs = now;
 
     const newBody = this.prepare(body);
     this.repl.stdin.write(`${newBody}\n\n`);
